@@ -1,0 +1,10 @@
+--- testapp.c.orig	2021-10-20 15:05:42.473635000 +0000
++++ testapp.c	2021-10-20 15:05:59.192635000 +0000
+@@ -160,6 +160,7 @@
+ {
+ #ifndef HAVE_UMEM_H
+     cache_t *cache = cache_create("test", sizeof(uint32_t), sizeof(char*));
++    int cache_error = 0;
+ 
+     if (cache == NULL) {
+         return TEST_FAIL;
