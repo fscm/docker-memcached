@@ -1,22 +1,20 @@
 # global args
 ARG __BUILD_DIR__="/build"
-ARG __DATA_DIR__="/data"
-ARG MEMCACHED_VERSION="1.6.12"
+ARG MEMCACHED_VERSION="1.6.13"
 
 
 
 FROM fscm/centos:stream as build
 
 ARG __BUILD_DIR__
-ARG __DATA_DIR__
 ARG __WORK_DIR__="/work"
 ARG MEMCACHED_VERSION
 ARG __USER__="root"
 ARG __SOURCE_DIR__="${__WORK_DIR__}/src"
 
 ENV \
-  LANG="C.UTF-8" \
-  LC_ALL="C.UTF-8"
+  LANG="C.utf8" \
+  LC_ALL="C.utf8"
 
 USER "${__USER__}"
 
@@ -31,7 +29,10 @@ RUN \
     echo '--> setting build env' && \
     set +h && \
     export __NPROC__="$(getconf _NPROCESSORS_ONLN || echo 1)" && \
-    export DCACHE_LINESIZE="$(getconf LEVEL1_DCACHE_LINESIZE || echo 64)" && \
+    #export DCACHE_LINESIZE="$(getconf LEVEL1_DCACHE_LINESIZE || echo 64)" && \
+    export DCACHE_LINESIZE="64" && \
+    export __KARCH__="$(case `arch` in x86_64*) echo x86;; aarch64) echo arm64;; esac)" && \
+    export __MARCH__="$(case `arch` in x86_64*) echo x86-64;; aarch64) echo armv8-a;; esac)" && \
     export MAKEFLAGS="--silent --no-print-directory --jobs ${__NPROC__}" && \
     export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig && \
 # build structure
@@ -39,12 +40,12 @@ RUN \
     for folder in 'bin'; do \
         install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/usr/${folder}"; \
     done && \
-    for folder in '/tmp' "${__DATA_DIR__}"; do \
+    for folder in '/tmp'; do \
         install --directory --owner="${__USER__}" --group="${__USER__}" --mode=1777 "${__BUILD_DIR__}${folder}"; \
     done && \
 # dependencies
     echo '--> instaling dependencies' && \
-    dnf --quiet --enablerepo='powertools' makecache --refresh && \
+    dnf --quiet makecache --refresh && \
     dnf --assumeyes --quiet --setopt=install_weak_deps='no' install \
         binutils \
         ca-certificates \
@@ -53,27 +54,33 @@ RUN \
         file \
         findutils \
         gcc \
+        gperf \
         gzip \
         jq \
         make \
         patch \
         perl-interpreter \
+        perl-base \
+        perl-lib \
+        perl-File-Compare \
+        perl-File-Copy \
+        perl-FindBin \
+        perl-IPC-Cmd \
         python3-devel \
         rsync \
         tar \
         xz \
         > /dev/null && \
-    dnf --assumeyes --quiet --setopt=install_weak_deps='no' --enablerepo='powertools' install \
-        gperf \
-        > /dev/null && \
+    ln --symbolic --force python3 /usr/bin/python && \
 # kernel headers
     echo '--> installing kernel headers' && \
     KERNEL_VERSION="$(curl --silent --location --retry 3 'https://www.kernel.org/releases.json' | jq -r '.latest_stable.version')" && \
     install --directory "${__SOURCE_DIR__}/kernel" && \
     curl --silent --location --retry 3 "https://cdn.kernel.org/pub/linux/kernel/v${KERNEL_VERSION%%.*}.x/linux-${KERNEL_VERSION}.tar.xz" \
-        | tar xJ --no-same-owner --strip-components=1 -C "${__SOURCE_DIR__}/kernel" $(echo linux-*/{Makefile,arch,include,scripts,tools,usr}) && \
+        | tar xJ --no-same-owner --strip-components=1 -C "${__SOURCE_DIR__}/kernel" && \
     cd "${__SOURCE_DIR__}/kernel" && \
-    make INSTALL_HDR_PATH="/usr/local" headers_install > /dev/null && \
+    make mrproper > /dev/null && \
+    make ARCH="${__KARCH__}" INSTALL_HDR_PATH="/usr/local" headers_install > /dev/null && \
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/kernel" && \
 # musl
@@ -83,7 +90,7 @@ RUN \
         | tar xz --no-same-owner --strip-components=1 -C "${__SOURCE_DIR__}/musl" && \
     cd "${__SOURCE_DIR__}/musl/_build" && \
     ../configure \
-        CFLAGS="-O2 -g0 -s -w -pipe -mtune=generic -DNDEBUG -DCLS=${DCACHE_LINESIZE}" \
+        CFLAGS="-fPIC -O2 -g0 -s -w -pipe -march=${__MARCH__} -mtune=generic -DNDEBUG -DCLS=${__DCACHE_LINESIZE__}" \
         --prefix='/usr/local' \
         --disable-debug \
         --disable-shared \
@@ -103,7 +110,7 @@ RUN \
     cd "${__SOURCE_DIR__}/zlib/_build" && \
     sed -i.orig -e '/(man3dir)/d' ../Makefile.in && \
     CC="musl-gcc -static --static" \
-    CFLAGS="-O2 -g0 -s -w -pipe -mtune=generic -DNDEBUG -DCLS=${DCACHE_LINESIZE}" \
+    CFLAGS="-fPIC -O2 -g0 -s -w -pipe -mmusl -march=${__MARCH__} -mtune=generic -DNDEBUG -DCLS=${__DCACHE_LINESIZE__}" \
     ../configure \
         --prefix='/usr/local' \
         --includedir='/usr/local/include' \
@@ -136,12 +143,11 @@ RUN \
         no-ssl3 \
         no-weak-ssl-ciphers \
         zlib \
-        -pipe \
         -static \
         -DCLS=${DCACHE_LINESIZE} \
         -DNDEBUG \
         -DOPENSSL_NO_HEARTBEATS \
-        -O2 -g0 -s -w -pipe -m64 -mtune=generic '-DDEVRANDOM="\"/dev/urandom\""' && \
+        -fPIC -O2 -g0 -s -w -pipe -mmusl -march=${__MARCH__} -mtune=generic '-DDEVRANDOM="\"/dev/urandom\""' && \
     make > /dev/null && \
     make install_sw > /dev/null && \
     make install_ssldirs > /dev/null && \
@@ -156,7 +162,7 @@ RUN \
     cd "${__SOURCE_DIR__}/libevent/_build" && \
     ../configure \
         CC="musl-gcc -static --static" \
-        CFLAGS="-O2 -g0 -s -w -pipe -mtune=generic -DNDEBUG -DCLS=${DCACHE_LINESIZE}" \
+        CFLAGS="-fPIC -O2 -g0 -s -w -pipe -mmusl -march=${__MARCH__} -mtune=generic -DNDEBUG -DCLS=${__DCACHE_LINESIZE__}" \
         --quiet \
         --prefix='/usr/local' \
         --includedir='/usr/local/include' \
@@ -183,7 +189,7 @@ RUN \
     sed -i.orig -e '/^SUBDIRS/ s/ \(doc\|tests\)//g' ../Makefile.in && \
     ../configure \
         CC="musl-gcc -static --static" \
-        CFLAGS="-O2 -g0 -s -w -pipe -mtune=generic -DNDEBUG -DCLS=${DCACHE_LINESIZE}" \
+        CFLAGS="-fPIC -O2 -g0 -s -w -pipe -mmusl -march=${__MARCH__} -mtune=generic -DNDEBUG -DCLS=${__DCACHE_LINESIZE__}" \
         --quiet \
         --prefix='/usr/local' \
         --includedir='/usr/local/include' \
@@ -207,7 +213,7 @@ RUN \
     # cd "${__SOURCE_DIR__}/cyrus-sasl/_build" && \
     # ../configure \
     #     CC="musl-gcc -static --static" \
-    #     CFLAGS="-O2 -g0 -s -w -pipe -mtune=generic -DNDEBUG -DCLS=${DCACHE_LINESIZE}" \
+    #     CFLAGS="-fPIC -O2 -g0 -s -w -pipe -mmusl -march=${__MARCH__} -mtune=generic -DNDEBUG -DCLS=${__DCACHE_LINESIZE__}" \
     #     --quiet \
     #     --prefix='/usr/local' \
     #     --includedir='/usr/local/include' \
@@ -251,7 +257,7 @@ RUN \
     cd "${__SOURCE_DIR__}/memcached/_build" && \
     ../configure \
         CC="musl-gcc -static --static" \
-        CFLAGS="-O2 -g0 -s -w -pipe -mtune=generic -DNDEBUG -DCLS=${DCACHE_LINESIZE}" \
+        CFLAGS="-fPIC -O2 -g0 -s -w -pipe -mmusl -march=${__MARCH__} -mtune=generic -DCLS=${__DCACHE_LINESIZE__}" \
         --quiet \
         --prefix='/usr' \
         --includedir='/usr/include' \
@@ -271,8 +277,8 @@ RUN \
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/memcached" && \
 # stripping
-    echo '--> stripping binaries' && \
-    find "${__BUILD_DIR__}"/usr/bin -type f -not -links +1 -exec strip --strip-all {} ';' && \
+    # echo '--> stripping binaries' && \
+    # find "${__BUILD_DIR__}"/usr/bin -type f -not -links +1 -exec strip --strip-all {} ';' && \
 # licenses
     echo '--> project licenses' && \
     install --owner="${__USER__}" --group="${__USER__}" --mode=0644 --target-directory="${__BUILD_DIR__}/licenses" "${__WORK_DIR__}/LICENSE" && \
@@ -284,15 +290,12 @@ RUN \
 FROM scratch
 
 ARG __BUILD_DIR__
-ARG __DATA_DIR__
 ARG REDIS_VERSION
 
 LABEL \
     maintainer="Frederico Martins <https://hub.docker.com/u/fscm/>" \
     vendor="fscm" \
     cmd="docker container run --detach --publish 11211:11211/tcp fscm/memcached" \
-    params="--volume $$PWD:${__DATA_DIR__}:rw"
-LABEL \
     org.label-schema.schema-version="1.0" \
     org.label-schema.name="fscm/memcached" \
     org.label-schema.description="A small image that can be used to run the memcached server" \
@@ -301,17 +304,10 @@ LABEL \
     org.label-schema.vendor="fscm" \
     org.label-schema.version=${REDIS_VERSION} \
     org.label-schema.docker.cmd="docker container run --interactive --rm --tty --publish 11211:11211/tcp fscm/memcached" \
-    org.label-schema.docker.cmd.test="docker container run --interactive --rm --tty fscm/memcached --version" \
-    org.label-schema.docker.params="--volume $$PWD:${__DATA_DIR__}:rw"
+    org.label-schema.docker.cmd.test="docker container run --interactive --rm --tty fscm/memcached --version"
 
 EXPOSE 11211/tcp
 
 COPY --from=build "${__BUILD_DIR__}" "/"
 
-VOLUME ["${__DATA_DIR__}"]
-
-WORKDIR "${__DATA_DIR__}"
-
 ENTRYPOINT ["/usr/bin/memcached"]
-
-#CMD ["--help"]

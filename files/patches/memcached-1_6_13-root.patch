@@ -1,0 +1,94 @@
+--- memcached.c.orig	2022-01-18 14:04:25.715800000 +0000
++++ memcached.c	2022-01-18 14:06:53.703160000 +0000
+@@ -3898,7 +3898,6 @@
+ #endif
+     printf("-d, --daemon              run as a daemon\n"
+            "-r, --enable-coredumps    maximize core file limit\n"
+-           "-u, --user=<user>         assume identity of <username> (only when run as root)\n"
+            "-m, --memory-limit=<num>  item memory in megabytes (default: %lu)\n"
+            "-M, --disable-evictions   return error on memory exhausted instead of evicting\n"
+            "-c, --conn-limit=<num>    max simultaneous connections (default: %d)\n"
+@@ -4622,7 +4621,6 @@
+     bool do_daemonize = false;
+     bool preallocate = false;
+     int maxcore = 0;
+-    char *username = NULL;
+     char *pid_file = NULL;
+     struct passwd *pw;
+     struct rlimit rlim;
+@@ -4812,7 +4810,6 @@
+           "v"   /* verbose */
+           "d"   /* daemon mode */
+           "l:"  /* interface to listen on */
+-          "u:"  /* user identity to run as */
+           "P:"  /* save PID in file */
+           "f:"  /* factor? */
+           "n:"  /* minimum space allocated for key+value+flags */
+@@ -4854,7 +4851,6 @@
+         {"verbose", optional_argument, 0, 'v'},
+         {"daemon", no_argument, 0, 'd'},
+         {"listen", required_argument, 0, 'l'},
+-        {"user", required_argument, 0, 'u'},
+         {"pidfile", required_argument, 0, 'P'},
+         {"slab-growth-factor", required_argument, 0, 'f'},
+         {"slab-min-size", required_argument, 0, 'n'},
+@@ -4979,9 +4975,6 @@
+                 return 1;
+             }
+             break;
+-        case 'u':
+-            username = optarg;
+-            break;
+         case 'P':
+             pid_file = optarg;
+             break;
+@@ -5742,36 +5735,6 @@
+         }
+     }
+
+-    /* lose root privileges if we have them */
+-    if (getuid() == 0 || geteuid() == 0) {
+-        if (username == 0 || *username == '\0') {
+-            fprintf(stderr, "can't run as root without the -u switch\n");
+-            exit(EX_USAGE);
+-        }
+-        if ((pw = getpwnam(username)) == 0) {
+-            fprintf(stderr, "can't find the user %s to switch to\n", username);
+-            exit(EX_NOUSER);
+-        }
+-        if (setgroups(0, NULL) < 0) {
+-            /* setgroups may fail with EPERM, indicating we are already in a
+-             * minimally-privileged state. In that case we continue. For all
+-             * other failure codes we exit.
+-             *
+-             * Note that errno is stored here because fprintf may change it.
+-             */
+-            bool should_exit = errno != EPERM;
+-            fprintf(stderr, "failed to drop supplementary groups: %s\n",
+-                    strerror(errno));
+-            if (should_exit) {
+-                exit(EX_OSERR);
+-            }
+-        }
+-        if (setgid(pw->pw_gid) < 0 || setuid(pw->pw_uid) < 0) {
+-            fprintf(stderr, "failed to assume identity of user %s\n", username);
+-            exit(EX_OSERR);
+-        }
+-    }
+-
+     /* Initialize Sasl if -S was specified */
+     if (settings.sasl) {
+         init_sasl();
+--- testapp.c.orig	2022-01-18 14:42:39.928179000 +0000
++++ testapp.c	2022-01-18 14:43:00.862417000 +0000
+@@ -537,10 +537,6 @@
+         }
+ #endif
+         /* Handle rpmbuild and the like doing this as root */
+-        if (getuid() == 0) {
+-            argv[arg++] = "-u";
+-            argv[arg++] = "root";
+-        }
+         if (daemon) {
+             argv[arg++] = "-d";
+             argv[arg++] = "-P";
