@@ -1,6 +1,6 @@
 # global args
 ARG __BUILD_DIR__="/build"
-ARG MEMCACHED_VERSION="1.6.13"
+ARG MEMCACHED_VERSION="1.6.14"
 
 
 
