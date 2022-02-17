@@ -5,5 +5,5 @@ services:
     build:
       context: .
       dockerfile: ${DOCKERFILE_PATH:-Dockerfile}
-    entrypoint: ["mkpasswd --version"]
+    entrypoint: ["memcached --version"]
     command: [""]
