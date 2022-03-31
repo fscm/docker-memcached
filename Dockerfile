@@ -1,10 +1,10 @@
 # global args
 ARG __BUILD_DIR__="/build"
-ARG MEMCACHED_VERSION="1.6.14"
+ARG MEMCACHED_VERSION="1.6.15"
 
 
 
-FROM fscm/centos:stream as build
+FROM fscm/centos:stream-9 as build
 
 ARG __BUILD_DIR__
 ARG __WORK_DIR__="/work"
@@ -81,6 +81,9 @@ RUN \
     cd "${__SOURCE_DIR__}/kernel" && \
     make mrproper > /dev/null && \
     make ARCH="${__KARCH__}" INSTALL_HDR_PATH="/usr/local" headers_install > /dev/null && \
+    # The kernel headers that exported to user space are not covered by the GPLv2 license.
+    # This is documented in the "Linux kernel licensing rules":
+    # https://www.kernel.org/doc/html/latest/process/license-rules.html
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/kernel" && \
 # musl
@@ -99,13 +102,17 @@ RUN \
         > /dev/null && \
     make > /dev/null && \
     make install > /dev/null && \
+    # Applications linked against all musl public header files and crt files are allowed to
+    # omit copyright notice and permission notice otherwise required by the license.
+    # This is documented in the "COPYRIGHT" file.
+    # https://git.musl-libc.org/cgit/musl/tree/COPYRIGHT
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/musl" && \
 # zlib
     echo '--> installing zlib' && \
     ZLIB_VERSION="$(rpm -q --qf "%{VERSION}" zlib)" && \
     install --directory "${__SOURCE_DIR__}/zlib/_build" && \
-    curl --silent --location --retry 3 "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz" \
+    curl --silent --location --retry 3 "https://zlib.net/fossils/zlib-${ZLIB_VERSION}.tar.gz" \
         | tar xz --no-same-owner --strip-components=1 -C "${__SOURCE_DIR__}/zlib" && \
     cd "${__SOURCE_DIR__}/zlib/_build" && \
     sed -i.orig -e '/(man3dir)/d' ../Makefile.in && \
@@ -119,6 +126,9 @@ RUN \
         > /dev/null && \
     make > /dev/null && \
     make install > /dev/null && \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/licenses/zlib" && \
+    install --owner="${__USER__}" --group="${__USER__}" --mode=0644 --target-directory="${__BUILD_DIR__}/licenses/zlib" '../README' && \
+    (cd .. && find ./ -type f -a \( -iname '*LICENSE*' -o -iname '*COPYING*' \) -exec cp --parents {} "${__BUILD_DIR__}/licenses/zlib" ';') && \
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/zlib" && \
 # openssl
@@ -151,6 +161,8 @@ RUN \
     make > /dev/null && \
     make install_sw > /dev/null && \
     make install_ssldirs > /dev/null && \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/licenses/openssl" && \
+    (cd .. && find ./ -type f -a \( -iname '*LICENSE*' -o -iname '*COPYING*' \) -exec cp --parents {} "${__BUILD_DIR__}/licenses/openssl" ';') && \
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/openssl" && \
 # libevent
@@ -172,11 +184,12 @@ RUN \
         --enable-silent-rules \
         --enable-static \
         --disable-debug-mode \
-        --disable-doxygen-html \
         --disable-samples \
         --disable-shared && \
     make > /dev/null && \
     make install > /dev/null && \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/licenses/libevent" && \
+    (cd .. && find ./ -type f -a \( -iname '*LICENSE*' -o -iname '*COPYING*' \) -exec cp --parents {} "${__BUILD_DIR__}/licenses/libevent" ';') && \
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/libevent" && \
 # libseccomp
@@ -202,6 +215,8 @@ RUN \
         --disable-shared && \
     make > /dev/null && \
     make install > /dev/null && \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/licenses/libseccomp" && \
+    (cd .. && find ./ -type f -a \( -iname '*LICENSE*' -o -iname '*COPYING*' \) -exec cp --parents {} "${__BUILD_DIR__}/licenses/libseccomp" ';') && \
     cd ~- && \
     rm -rf "${__SOURCE_DIR__}/libseccomp" && \
 # cyrus-sasl
